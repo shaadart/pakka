@@ -361,6 +361,10 @@ textarea::placeholder { color: var(--muted); }
 .ledger footer b { color: var(--fg); font-weight: 400; }
 .ledger .endpoint { font-family: var(--f-slip); font-size: 0.6875rem; overflow-wrap: anywhere; }
 
+/* Page credit */
+.credit { flex: none; text-align: center; font-size: 0.75rem; color: var(--muted); padding: 6px 16px calc(6px + env(safe-area-inset-bottom, 0px)); }
+.credit a { color: var(--fg); text-underline-offset: 2px; }
+
 /* Contract check dialog */
 .modal {
   position: fixed;

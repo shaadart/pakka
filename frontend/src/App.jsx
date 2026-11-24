@@ -374,6 +374,10 @@ export default function App() {
         />
       </main>
 
+      <footer className="credit">
+        Made by Shaad · <a href="https://madebyshaad.com" target="_blank" rel="noopener">See more of my work</a>
+      </footer>
+
       {inspecting && <Inspection onClose={() => { setInspecting(false); loadLedger(sidRef.current); }} />}
     </div>
   );
