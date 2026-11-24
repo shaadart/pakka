@@ -98,14 +98,14 @@ jobs:
           failure-threshold: error
       - run: docker build --target runtime -t pakka-backend:ci backend
       - name: Trivy image scan (fixable HIGH/CRITICAL only)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: pakka-backend:ci
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
       - name: Trivy config scan (Dockerfiles, fly.toml)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: config
           scan-ref: .
@@ -119,8 +119,8 @@ jobs:
     needs: [backend, frontend, secrets, dependencies, container]
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          echo '${{ toJSON(needs.*.result) }}' | grep -qvE 'failure|cancelled' || exit 1
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
 
   deploy-backend:
     name: Deploy backend (Fly.io)
