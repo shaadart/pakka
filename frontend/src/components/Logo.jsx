@@ -1,33 +1,12 @@
-// Pakka Ghost Stub mark: crisp monochrome notched ticket over a quiet ghost twin
-// (primary reply + cached/failover backup), with a clean perforation cut.
-export default function Logo({ variant = "counter", className }) {
-  const stamp = variant === "stamp";
-  const fill = stamp ? "var(--counter)" : "var(--paper)";
-  const cut = stamp ? "var(--paper)" : "var(--counter)";
-
+// Pakka mark: a printed receipt with a torn edge, over a ghost twin (the backup key, or the cached copy).
+export default function Logo({ className }) {
   return (
     <svg viewBox="0 0 64 64" fill="none" className={className} aria-hidden="true">
-      <path
-        className="ticket-ghost"
-        d="M 19 16 A 3 3 0 0 1 22 13 H 51 A 3 3 0 0 1 54 16 V 28.5 A 5 5 0 0 0 54 38.5 V 51 A 3 3 0 0 1 51 54 H 22 A 3 3 0 0 1 19 51 V 38.5 A 5 5 0 0 0 19 28.5 Z"
-        fill={fill}
-        opacity="0.24"
-      />
-      <path
-        className="ticket-front"
-        d="M 10 13 A 3 3 0 0 1 13 10 H 42 A 3 3 0 0 1 45 13 V 25.5 A 5 5 0 0 0 45 35.5 V 48 A 3 3 0 0 1 42 51 H 13 A 3 3 0 0 1 10 48 V 35.5 A 5 5 0 0 0 10 25.5 Z"
-        fill={fill}
-      />
-      <line
-        x1="17"
-        y1="30.5"
-        x2="38"
-        y2="30.5"
-        stroke={cut}
-        strokeWidth="2.4"
-        strokeDasharray="4 3.5"
-        strokeLinecap="round"
-      />
+      <path className="ticket-ghost" d="M 19 13 H 51 V 53 L 47 50 L 43 53 L 39 50 L 35 53 L 31 50 L 27 53 L 23 50 L 19 53 Z" fill="var(--paper)" opacity="0.24" />
+      <path d="M 10 10 H 42 V 50 L 38 47 L 34 50 L 30 47 L 26 50 L 22 47 L 18 50 L 14 47 L 10 50 Z" fill="var(--paper)" />
+      <line x1="16" y1="18" x2="36" y2="18" stroke="var(--counter)" strokeWidth="2.4" strokeLinecap="round" />
+      <line x1="16" y1="25" x2="29" y2="25" stroke="var(--counter)" strokeWidth="2.4" strokeLinecap="round" />
+      <line x1="16" y1="35" x2="36" y2="35" stroke="var(--counter)" strokeWidth="2.4" strokeDasharray="4 3.5" strokeLinecap="round" />
     </svg>
   );
 }

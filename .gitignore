@@ -10,3 +10,7 @@ __pycache__/
 .venv/
 node_modules/
 dist/
+
+# Frontend test output
+test-results/
+playwright-report/

@@ -1,18 +1,22 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getHealth, getHistory, postChat } from "./api.js";
 import { Slip, VoidSlip } from "./components/Slip.jsx";
 import Ledger from "./components/Ledger.jsx";
 import Inspection from "./components/Inspection.jsx";
 import Logo from "./components/Logo.jsx";
+import Rig from "./components/Rig.jsx";
+import Composer, { SAMPLES } from "./components/Composer.jsx";
 
-const FIRST_QUESTION = "Kal 11 baje slot milega?";
-const DRILL_STEPS = ["ok", "429", "500", "502", "503"];
+const SID_KEY = "pakka.lastSession";
 const newSessionId = () => "s-" + Math.random().toString(16).slice(2, 10);
 const clock = () => new Date().toTimeString().slice(0, 8);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+// Storage can throw (private mode). Losing the "previous session" link is the only cost.
+const readLastSession = () => { try { return localStorage.getItem(SID_KEY); } catch { return null; } };
+const saveLastSession = (id) => { try { localStorage.setItem(SID_KEY, id); } catch { /* see above */ } };
 
-// X-Simulate-Failure value for the drill chips, or null when every key is healthy.
-function drillHeader(drill, keyIds) {
+// X-Simulate-Failure value for the drill, or null when every key is healthy.
+export function drillHeader(drill, keyIds) {
   const failing = keyIds.filter((k) => drill[k] && drill[k] !== "ok");
   if (!failing.length) return null;
   if (failing.length === keyIds.length && failing.every((k) => drill[k] === drill[failing[0]])) return `*=${drill[failing[0]]}`;
@@ -26,11 +30,74 @@ function friendly422(body) {
   return "A message needs 1 to 4000 characters. Nothing was sent to the model or saved.";
 }
 
+// For each slip, the other slip that printed the same cache key (prefer the earliest one).
+function findTwins(feed) {
+  const first = new Map();
+  const twins = new Map();
+  for (const item of feed) {
+    if (item.type !== "slip" || !item.meta.cache_key) continue;
+    const seen = first.get(item.meta.cache_key);
+    if (!seen) { first.set(item.meta.cache_key, item); continue; }
+    twins.set(item.id, seen);
+    if (!twins.has(seen.id)) twins.set(seen.id, item);
+  }
+  return twins;
+}
+
+const Feed = memo(function Feed({ feed, sessionId, flashId, onJump, onRetry }) {
+  const twins = findTwins(feed);
+  return feed.map((item) => {
+    switch (item.type) {
+      case "divider":
+        return <div key={item.id} className="divider" role="separator">{item.text}</div>;
+      case "user":
+        return (
+          <div key={item.id} className={`user${item.unsaved ? " unsaved" : ""}`}>
+            <div className="bubble">{item.text}</div>
+            {item.unsaved && (
+              <span className="tag">
+                Not saved
+                {item.sid === sessionId && <button className="btn" type="button" onClick={() => onRetry(item)}>Retry</button>}
+              </span>
+            )}
+          </div>
+        );
+      case "pending":
+        return (
+          <div key={item.id} className="slipwrap">
+            <article className="slip printing" aria-label="Printing the receipt"><div className="reply">printing...</div></article>
+          </div>
+        );
+      case "slip": {
+        const twin = twins.get(item.id);
+        return (
+          <div key={item.id} id={`slip-${item.id}`} className={flashId === item.id ? "flash" : undefined}>
+            <Slip
+              reply={item.reply}
+              meta={item.meta}
+              number={item.number}
+              time={item.time}
+              past={item.past}
+              twin={twin && { id: twin.id, number: twin.number, sameSession: twin.sid === item.sid }}
+              onJump={onJump}
+            />
+          </div>
+        );
+      }
+      case "void":
+        return <div key={item.id}><VoidSlip detail={item.detail} time={item.time} /></div>;
+      default:
+        return <div key={item.id} className="notice" role="alert">{item.text}</div>;
+    }
+  });
+});
+
 export default function App() {
-  const [sessionId, setSessionId] = useState(newSessionId); // a new session on every page load
+  const [previous] = useState(readLastSession); // read before this load's new id overwrites it
+  const [prevRows, setPrevRows] = useState(null);
+  const [sessionId, setSessionId] = useState(newSessionId); // the contract: a new session on every page load
   const sidRef = useRef(sessionId);
   const [feed, setFeed] = useState([]);
-  const [text, setText] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [pending, setPending] = useState(false);
   const [health, setHealth] = useState({ state: "checking", data: null });
@@ -38,14 +105,21 @@ export default function App() {
   const [ledger, setLedger] = useState(null);
   const [rawLedger, setRawLedger] = useState(false);
   const [ledgerOpen, setLedgerOpen] = useState(false);
+  const [rigOpen, setRigOpen] = useState(false);
   const [inspecting, setInspecting] = useState(false);
-  const [hoverKey, setHoverKey] = useState(null);
+  const [flashId, setFlashId] = useState(null);
+  const [announce, setAnnounce] = useState("");
+  const [newBelow, setNewBelow] = useState(false);
   const feedRef = useRef(null);
-  const inputRef = useRef(null);
+  const atBottom = useRef(true);
   const nextId = useRef(1);
-  const receipts = useRef(0);
+  const receipts = useRef(0); // numbered per session
+  const historyBtn = useRef(null);
+  const ledgerWasOpen = useRef(false);
 
-  const keyIds = health.data ? Array.from({ length: health.data.keys_configured }, (_, i) => `key_${i + 1}`) : [];
+  const keyIds = health.data && health.data.simulation_enabled
+    ? Array.from({ length: health.data.keys_configured }, (_, i) => `key_${i + 1}`)
+    : [];
   const header = drillHeader(drill, keyIds);
 
   const add = useCallback((item) => {
@@ -58,6 +132,8 @@ export default function App() {
 
   // The status sign. A sleeping free-tier host can take a while, so retry before saying closed.
   const aliveRef = useRef(true);
+  const healthState = useRef("checking");
+  healthState.current = health.state;
   const checkHealth = useCallback(async () => {
     setHealth((h) => ({ ...h, state: "waking" }));
     for (const pause of [0, 1500, 3000, 6000]) {
@@ -71,41 +147,106 @@ export default function App() {
   useEffect(() => {
     aliveRef.current = true;
     checkHealth();
-    return () => { aliveRef.current = false; };
+    // Re-check every 30 s, so a backend that dies later does not keep showing Online.
+    const timer = setInterval(async () => {
+      if (document.hidden || healthState.current !== "open") return;
+      const res = await getHealth();
+      if (!aliveRef.current) return;
+      if (res.status === 200) setHealth({ state: "open", data: res.body });
+      else checkHealth();
+    }, 30000);
+    return () => { aliveRef.current = false; clearInterval(timer); };
   }, [checkHealth]);
 
   const loadLedger = useCallback(async (id) => {
     const res = await getHistory(id);
     if (sidRef.current === id) setLedger(res);
   }, []);
-  useEffect(() => { loadLedger(sessionId); }, [sessionId, loadLedger]);
+  useEffect(() => { saveLastSession(sessionId); loadLedger(sessionId); }, [sessionId, loadLedger]);
 
+  // Offer the session from before the reload, read-only. It is never sent back to the model.
+  useEffect(() => {
+    if (!previous) return;
+    getHistory(previous).then((res) => {
+      if (res.status === 200 && res.body.messages.length) setPrevRows(res.body.messages);
+    });
+  }, [previous]);
+  function showPrevious() {
+    const items = [{ type: "divider", text: `Earlier session ${previous}. Shown for reference; this chat does not remember it.` }];
+    let n = 0;
+    for (const m of prevRows) {
+      if (m.role === "user") items.push({ type: "user", text: m.content, sid: previous, past: true });
+      else if (m.metadata) items.push({ type: "slip", reply: m.content, meta: m.metadata, number: ++n, sid: previous, time: "earlier", past: true });
+    }
+    items.push({ type: "divider", text: `This session ${sidRef.current}` });
+    setFeed((f) => [...items.map((i) => ({ id: nextId.current++, ...i })), ...f]);
+    setPrevRows(null);
+  }
+
+  // Follow new messages only when the reader is already at the bottom, or just sent something.
   useLayoutEffect(() => {
     const el = feedRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    const last = feed[feed.length - 1];
+    if (atBottom.current || (last && (last.type === "user" || last.type === "pending"))) {
+      el.scrollTop = el.scrollHeight;
+      atBottom.current = true;
+      setNewBelow(false);
+    } else if (last) {
+      setNewBelow(true);
+    }
   }, [feed]);
+  function onFeedScroll() {
+    const el = feedRef.current;
+    atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (atBottom.current) setNewBelow(false);
+  }
+  function toBottom() {
+    const el = feedRef.current;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    setNewBelow(false);
+  }
 
+  // Mobile History drawer: focus moves in, Esc closes it, focus returns to the History button.
   useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 140) + "px";
-  }, [text]);
+    if (ledgerOpen) {
+      document.querySelector(".ledger .close")?.focus();
+      const onKey = (e) => { if (e.key === "Escape") setLedgerOpen(false); };
+      document.addEventListener("keydown", onKey);
+      ledgerWasOpen.current = true;
+      return () => document.removeEventListener("keydown", onKey);
+    }
+    if (ledgerWasOpen.current) historyBtn.current?.focus();
+    ledgerWasOpen.current = false;
+  }, [ledgerOpen]);
+  // The drawer only exists below 1000px. Close it on widening so the inert chat does not stay locked.
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1001px)");
+    const onChange = () => { if (mq.matches) setLedgerOpen(false); };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  const jumpTo = useCallback((id) => {
+    document.getElementById(`slip-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setFlashId(id);
+    setTimeout(() => setFlashId(null), 1800);
+  }, []);
 
   function startSession() {
     const id = newSessionId();
     sidRef.current = id;
+    receipts.current = 0;
     setSessionId(id);
     setLedger(null);
     add({ type: "divider", text: `New session ${id}. History starts empty.` });
     return id;
   }
 
+  // Returns text to put back in the box when the server refused it as too long.
   async function send(raw, { fresh = false } = {}) {
     if (pending) return;
     const session = fresh ? startSession() : sidRef.current;
     const trimmed = raw.trim();
-    setText("");
     setPending(true);
     const userId = trimmed ? add({ type: "user", text: trimmed, sid: session }) : null;
     const pendingId = trimmed ? add({ type: "pending", sid: session }) : null;
@@ -116,15 +257,19 @@ export default function App() {
 
     if (pendingId) drop(pendingId);
     const time = clock();
+    let giveBack = null;
     if (res.status === 200) {
+      const hit = res.body.metadata.resolution_source === "LLM_CACHE";
       receipts.current += 1;
+      setAnnounce(`Reply from ${hit ? "the cache" : "the live model"}, ${res.body.metadata.latency_ms} ms: ${res.body.reply}`);
       add({ type: "slip", reply: res.body.reply, meta: res.body.metadata, number: receipts.current, sid: session, time });
     } else if (res.status === 503) {
       if (userId) patch(userId, { unsaved: true });
+      setAnnounce("Every key failed. Nothing was answered or saved.");
       add({ type: "void", detail: (res.body && res.body.detail) || "all providers unavailable", sid: session, time });
     } else if (res.status === 422) {
       if (userId) drop(userId);
-      if (raw.length > 4000) setText(raw); // give a too-long message back so it can be trimmed
+      if (trimmed.length > 4000) giveBack = raw;
       add({ type: "notice", text: friendly422(res.body), sid: session });
     } else if (res.status === 0) {
       if (userId) patch(userId, { unsaved: true });
@@ -135,30 +280,21 @@ export default function App() {
     }
     setPending(false);
     loadLedger(session);
-    if (inputRef.current) inputRef.current.focus();
+    return giveBack;
   }
-
-  function onKeyDown(e) {
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      send(text);
-    }
-  }
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  const retry = useCallback((item) => { drop(item.id); sendRef.current(item.text); }, [drop]);
 
   const sign =
-    health.state === "open" ? (
-      <>Online · <b>{health.data.keys_configured}</b> keys · cache {health.data.cache_enabled ? "on" : "off"}</>
-    ) : health.state === "closed" ? (
-      <>Backend not answering</>
-    ) : (
-      <>Waking the backend...</>
-    );
-  const showDrill = health.data && health.data.simulation_enabled && keyIds.length > 0;
-  const over = text.trim().length > 4000;
+    health.state === "open" ? <>Online · {health.data.keys_configured} keys · cache {health.data.cache_enabled ? "on" : "off"}</>
+    : health.state === "closed" ? <>Backend not answering</>
+    : <>Waking the backend...</>;
+  const locked = ledgerOpen || inspecting; // a drawer or dialog is open: the rest of the page is inert
 
   return (
     <div className="app">
-      <header className="top">
+      <header className="top" inert={locked}>
         <div className="brand">
           <Logo />
           <div>
@@ -166,136 +302,75 @@ export default function App() {
             <p>Every reply, accounted for</p>
           </div>
         </div>
-        <div className={`sign ${health.state}`} title="From GET /health">
+        <div className={`sign ${health.state}`} role="status" title="From GET /health">
+          <span className="dot" aria-hidden="true" />
           {sign}
-          {health.state === "closed" && <button className="mini" type="button" onClick={checkHealth}>Retry</button>}
+          {health.state === "closed" && <button className="btn" type="button" onClick={checkHealth}>Retry</button>}
         </div>
-        {showDrill && (
-          <div className="drill">
-            <span className="lbl">Simulate failure</span>
-            {keyIds.map((k) => {
-              const state = drill[k] || "ok";
-              return (
-                <button
-                  key={k}
-                  type="button"
-                  className="chip"
-                  data-state={state}
-                  onClick={() => setDrill((d) => ({ ...d, [k]: DRILL_STEPS[(DRILL_STEPS.indexOf(state) + 1) % DRILL_STEPS.length] }))}
-                  aria-label={`${k}: ${state === "ok" ? "healthy" : "simulated " + state}. Click to cycle ok, 429, 500, 502, 503.`}
-                >
-                  {k}: {state}
-                </button>
-              );
-            })}
-            {header && <button className="chip reset" type="button" onClick={() => setDrill({})}>Reset</button>}
-            <code>{header ? `X-Simulate-Failure: ${header}` : "Click a key to cycle ok, 429, 500, 502, 503"}</code>
-          </div>
-        )}
         <div className="actions">
           <button className="btn" type="button" onClick={() => startSession()}>New session</button>
-          <button className="btn ledger-open" type="button" onClick={() => setLedgerOpen(true)}>History</button>
-          <button className="btn" type="button" onClick={() => setInspecting(true)}>Run checks</button>
+          <button ref={historyBtn} className="btn ledger-open" type="button" onClick={() => setLedgerOpen(true)}>History</button>
+          <button className={`btn${header ? " alert" : ""}`} type="button" aria-expanded={rigOpen} aria-controls="rig" onClick={() => setRigOpen((o) => !o)}>
+            Test rig{header ? " · failures on" : ""}
+          </button>
         </div>
       </header>
 
+      {rigOpen && (
+        <Rig
+          keyIds={keyIds}
+          drill={drill}
+          setDrill={setDrill}
+          header={header}
+          systemPrompt={systemPrompt}
+          setSystemPrompt={setSystemPrompt}
+          onCacheDemo={() => send(SAMPLES[0], { fresh: true })}
+          onRunChecks={() => setInspecting(true)}
+          pending={pending}
+          inert={locked}
+        />
+      )}
+
       <main className="layout">
-        <section className="chat">
-          <div className="feed" ref={feedRef} aria-live="polite" aria-busy={pending}>
+        <section className="chat" inert={locked}>
+          <div className="sr-only" aria-live="polite">{announce}</div>
+          <div className="feed" ref={feedRef} onScroll={onFeedScroll}>
+            {prevRows && (
+              <button className="btn prev" type="button" onClick={showPrevious}>
+                Show the session from before you reloaded ({prevRows.length} messages)
+              </button>
+            )}
             {feed.length === 0 && (
               <div className="intro">
-                <h2>Ask the front desk.</h2>
-                <p>
-                  Ask anything, in any language. Under each reply you will see where it came from (live model or cache),
-                  which key answered, how long it took and how many tokens it used.
-                </p>
+                <h2>Ask anything. Get a receipt.</h2>
+                <p>Ask about a slot, a price or your name, in any language. Every answer prints a receipt showing where it came from and what it cost.</p>
+                <div className="sample" aria-hidden="true">
+                  <div className="slip">
+                    <div className="reply">Haan ji, kal 11 baje ka slot khaali hai.</div>
+                    <div className="lines">
+                      <div className="ln"><span className="k">Source · live</span><span className="lead" /><span className="v">LIVE_INFERENCE</span></div>
+                      <div className="ln"><span className="k">Latency</span><span className="lead" /><span className="v">840 ms</span></div>
+                      <div className="ln"><span className="k">Tokens</span><span className="lead" /><span className="v">36 in · 31 out</span></div>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
-            {feed.map((item) => {
-              const past = item.sid && item.sid !== sessionId ? " past" : "";
-              switch (item.type) {
-                case "divider":
-                  return <div key={item.id} className="divider">{item.text}</div>;
-                case "user":
-                  return (
-                    <div key={item.id} className={`user${item.unsaved ? " unsaved" : ""}${past}`}>
-                      <div className="bubble">{item.text}</div>
-                      {item.unsaved && <span className="tag">not saved</span>}
-                    </div>
-                  );
-                case "pending":
-                  return (
-                    <div key={item.id} className="slipwrap">
-                      <article className="slip printing" aria-label="Printing the receipt"><div className="reply">printing...</div></article>
-                    </div>
-                  );
-                case "slip":
-                  return (
-                    <div key={item.id} className={past.trim()}>
-                      <Slip
-                        reply={item.reply}
-                        meta={item.meta}
-                        number={item.number}
-                        sessionId={item.sid}
-                        time={item.time}
-                        matched={!!hoverKey && item.meta.cache_key === hoverKey}
-                        onHoverKey={setHoverKey}
-                      />
-                    </div>
-                  );
-                case "void":
-                  return <div key={item.id} className={past.trim()}><VoidSlip detail={item.detail} sessionId={item.sid} time={item.time} /></div>;
-                default:
-                  return <div key={item.id} className="notice" role="alert">{item.text}</div>;
-              }
-            })}
+            <Feed feed={feed} sessionId={sessionId} flashId={flashId} onJump={jumpTo} onRetry={retry} />
           </div>
-
-          <div className="composer-wrap">
-            <div className="tries">
-              <span className="lbl">Try</span>
-              <button className="try" type="button" onClick={() => send(FIRST_QUESTION)} disabled={pending}>{FIRST_QUESTION}</button>
-              <button className="try" type="button" onClick={() => send(FIRST_QUESTION, { fresh: true })} disabled={pending}>Same question, new session</button>
-              <button className="try" type="button" onClick={() => send("Mera naam Asha hai")} disabled={pending}>Mera naam Asha hai</button>
-              <button className="try" type="button" onClick={() => send("Mera naam kya hai?")} disabled={pending}>Mera naam kya hai?</button>
-            </div>
-            <details className="sys">
-              <summary>System prompt (optional)</summary>
-              <textarea
-                id="system-prompt"
-                data-testid="system-prompt-input"
-                rows={2}
-                value={systemPrompt}
-                onChange={(e) => setSystemPrompt(e.target.value)}
-                placeholder="Optional. Overrides the default instructions for this session."
-                aria-label="System prompt"
-              />
-            </details>
-            <form className="composer" onSubmit={(e) => { e.preventDefault(); send(text); }}>
-              <textarea
-                id="message"
-                ref={inputRef}
-                data-testid="chat-input"
-                rows={1}
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={onKeyDown}
-                placeholder="Type a message. Enter sends, Shift+Enter adds a line."
-                aria-label="Message"
-              />
-              <button className="send" type="submit" data-testid="send-button" disabled={pending}>Send</button>
-            </form>
-            <div className={`count${over ? " over" : ""}`}>{text.trim().length} / 4000</div>
-          </div>
+          {newBelow && <div className="below"><button className="btn" type="button" onClick={toBottom}>New reply below</button></div>}
+          <Composer onSend={send} pending={pending} />
         </section>
 
+        {ledgerOpen && <div className="scrim" onClick={() => setLedgerOpen(false)} />}
         <Ledger
           className={ledgerOpen ? "open" : ""}
           sessionId={sessionId}
           result={ledger}
           raw={rawLedger}
-          onToggleRaw={() => setRawLedger((r) => !r)}
+          onRaw={setRawLedger}
           onClose={() => setLedgerOpen(false)}
+          inert={inspecting}
         />
       </main>
 
