@@ -1,24 +1,33 @@
-import { useId } from "react";
-
-// Pakka Single-Cut mark: one monochrome notched ticket, cleanly sliced on a rising tear line.
+// Pakka Ghost Stub mark: crisp monochrome notched ticket over a quiet ghost twin
+// (primary reply + cached/failover backup), with a clean perforation cut.
 export default function Logo({ variant = "counter", className }) {
-  const id = useId();
-  const fill = variant === "stamp" ? "var(--counter)" : "var(--paper)";
-  const ticket =
-    "M 15 10 A 3.5 3.5 0 0 1 18.5 6.5 H 45.5 A 3.5 3.5 0 0 1 49 10 V 25 A 6.5 6.5 0 0 0 49 38 V 54 A 3.5 3.5 0 0 1 45.5 57.5 H 18.5 A 3.5 3.5 0 0 1 15 54 V 38 A 6.5 6.5 0 0 0 15 25 Z";
+  const stamp = variant === "stamp";
+  const fill = stamp ? "var(--counter)" : "var(--paper)";
+  const cut = stamp ? "var(--paper)" : "var(--counter)";
 
   return (
     <svg viewBox="0 0 64 64" fill="none" className={className} aria-hidden="true">
-      <defs>
-        <clipPath id={`${id}-t`}><polygon points="0,0 64,0 64,25.2 0,34.4" /></clipPath>
-        <clipPath id={`${id}-b`}><polygon points="0,38 64,28.8 64,64 0,64" /></clipPath>
-      </defs>
-      <g className="ticket-top">
-        <path d={ticket} fill={fill} clipPath={`url(#${id}-t)`} />
-      </g>
-      <g className="ticket-bot">
-        <path d={ticket} fill={fill} clipPath={`url(#${id}-b)`} />
-      </g>
+      <path
+        className="ticket-ghost"
+        d="M 19 16 A 3 3 0 0 1 22 13 H 51 A 3 3 0 0 1 54 16 V 28.5 A 5 5 0 0 0 54 38.5 V 51 A 3 3 0 0 1 51 54 H 22 A 3 3 0 0 1 19 51 V 38.5 A 5 5 0 0 0 19 28.5 Z"
+        fill={fill}
+        opacity="0.24"
+      />
+      <path
+        className="ticket-front"
+        d="M 10 13 A 3 3 0 0 1 13 10 H 42 A 3 3 0 0 1 45 13 V 25.5 A 5 5 0 0 0 45 35.5 V 48 A 3 3 0 0 1 42 51 H 13 A 3 3 0 0 1 10 48 V 35.5 A 5 5 0 0 0 10 25.5 Z"
+        fill={fill}
+      />
+      <line
+        x1="17"
+        y1="30.5"
+        x2="38"
+        y2="30.5"
+        stroke={cut}
+        strokeWidth="2.4"
+        strokeDasharray="4 3.5"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
