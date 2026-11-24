@@ -271,7 +271,26 @@ test("tap targets are at least 44 px on phones", async ({ page }) => {
     [...document.querySelectorAll("button, textarea")]
       .filter((el) => el.offsetParent && !el.closest("[inert]") && !el.closest(".ledger:not(.open)"))
       .map((el) => ({ t: el.textContent.trim().slice(0, 30), h: el.getBoundingClientRect().height }))
-      .filter((b) => b.h < 44),
+      .filter((b) => b.h < 43.9), // sub-pixel rounding from rem sizes
   );
-  expect(small).toEqual([]);
+  expect(small, JSON.stringify(small)).toEqual([]);
+});
+
+test("Copy reply puts the reply text on the clipboard", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await open(page);
+  await ask(page, "copy me");
+  await page.getByRole("button", { name: "Copy reply" }).click();
+  await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("Reply to: copy me");
+  await expect(page.getByRole("button", { name: "Copy reply" })).toBeVisible(); // resets
+});
+
+test("spacing and type scale with the user's font size", async ({ page }) => {
+  await open(page);
+  const px = async () => (await page.locator(".top").boundingBox()).height;
+  const before = await px();
+  await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+  expect(await px()).toBeGreaterThan(before * 1.4);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize().width);
 });

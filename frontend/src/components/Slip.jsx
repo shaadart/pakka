@@ -1,3 +1,4 @@
+import { useState } from "react";
 import Barcode from "./Barcode.jsx";
 
 function Line({ k, children, tone, title }) {
@@ -18,6 +19,25 @@ function VoidLine({ keyId, status }) {
   );
 }
 
+// Copies the reply text only. Clipboard access can be refused, so say so instead of failing silently.
+function CopyReply({ text }) {
+  const [state, setState] = useState("idle");
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setState("done");
+    } catch {
+      setState("failed");
+    }
+    setTimeout(() => setState("idle"), 1800);
+  }
+  return (
+    <button type="button" className="copy" onClick={copy}>
+      {state === "done" ? "Copied" : state === "failed" ? "Copy failed" : "Copy reply"}
+    </button>
+  );
+}
+
 const receiptNo = (n) => `Receipt #${String(n).padStart(4, "0")}`;
 
 // One assistant reply with its receipt. The data-testids follow the assignment's UI contract.
@@ -35,7 +55,7 @@ export function Slip({ reply, meta, number, time, past, twin, onJump }) {
             {receiptNo(number)}
             {hit && <span className="stamp">From cache</span>}
           </span>
-          <span>{time}</span>
+          <span className="when">{time}<CopyReply text={reply} /></span>
         </div>
         <div className="lines">
           <Line k={hit ? "Source · cache" : "Source · live"}><span data-testid={id("meta-source")}>{meta.resolution_source}</span></Line>

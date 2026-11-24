@@ -20,8 +20,8 @@
 | Any reply | Counts what that one reply used | Latency · input and output tokens |
 
 <p align="center">
-  <img src="docs/images/screens/hero.png" alt="Pakka chat. The first answer is LIVE_INFERENCE: key_1 is struck through as failed and key_2 answered in 11062 ms, 40 in and 28 out tokens. The same question in a new session comes back from the cache in 3 ms, 0 billed, with the same barcode and a link to the first receipt. The History panel shows the saved rows." width="100%">
-  <br><sub>A real run, nothing simulated: <code>key_1</code> failed, <code>key_2</code> answered in 11 s. Asked again in a new session, the same answer came from the cache in 3 ms and billed 0 tokens.</sub>
+  <img src="docs/images/screens/hero.png" alt="Pakka chat. The first answer is LIVE_INFERENCE from key_1 in 1501 ms, 40 in and 25 out tokens. The same question in a new session comes back from the cache in 1 ms, 0 billed, with the same barcode and a link to the first receipt. The History panel shows the saved rows." width="100%">
+  <br><sub>A real run, nothing simulated: a live answer in 1.5 s. Asked again in a new session, the same answer came from the cache in 1 ms and billed 0 tokens. Each receipt has a <b>Copy reply</b> link.</sub>
 </p>
 
 > **Grading on a clock?** Open the app, open **Test rig** and press **Run checks**, then **Start**. All 14 contract rules run live from your browser.
@@ -224,7 +224,7 @@ Both run one file, [`checks.js`](frontend/src/inspection/checks.js), so they can
 
 <table>
   <tr>
-    <td width="55%"><img src="docs/images/screens/receipt.png" alt="A cache-hit receipt. Reply text, Receipt #0001 with a From cache stamp, then Source LLM_CACHE, Model gemini/gemini-3.5-flash-lite, Key none used, Latency 1 ms, Tokens 0 billed, first call 36 in 27 out, a barcode, the cache key 91f5 5820 07e5 f3b0 and a link Same key as Receipt #0001, earlier session."></td>
+    <td width="55%"><img src="docs/images/screens/receipt.png" alt="A cache-hit receipt. Reply text, Receipt #0001 with a From cache stamp, then Source LLM_CACHE, Model gemini/gemini-3.5-flash-lite, Key none used, Latency 1 ms, Tokens 0 billed, first call 36 in 27 out, a barcode, the cache key 91f5 5820 07e5 f3b0 and a link Same key as Receipt #0001, earlier session. A Copy reply link sits beside the time."></td>
     <td>
 
 | Line | Means |
@@ -235,6 +235,7 @@ Both run one file, [`checks.js`](frontend/src/inspection/checks.js), so they can
 | **Latency** | Time for this reply |
 | **Tokens** | What this reply used. A cache hit bills 0 and shows the first call's counts |
 | **Barcode** | Real Code 128 of the cache key. Scan it and you get the printed text |
+| **Copy reply** | Puts the reply text on your clipboard, without the receipt |
 
 </td>
   </tr>
