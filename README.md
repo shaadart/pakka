@@ -26,7 +26,7 @@
 
 > **Grading on a clock?** Open the app, open **Test rig** and press **Run checks**, then **Start**. All 14 contract rules run live from your browser.
 >
-> **Status:** 37/37 backend tests pass · 14/14 live checks pass on `gemini/gemini-3.5-flash-lite` · not deployed yet
+> **Status:** 37/37 backend tests pass · 14/14 live checks pass on `gemini/gemini-3.5-flash-lite` · deployed: [pakka.madebyshaad.com](https://pakka.madebyshaad.com)
 
 <details>
 <summary><b>New to these words?</b></summary>
@@ -52,13 +52,110 @@
 
 | | |
 |---|---|
-| Frontend | TBD |
-| Backend | TBD |
-| Health | `<backend>/health` |
+| Frontend | https://pakka.madebyshaad.com |
+| Backend | https://pakka-api.fly.dev |
+| Health | https://pakka-api.fly.dev/health |
 | Demo video | TBD |
 
-- `ENABLE_FAILURE_SIMULATION=true` is on in production, so `X-Simulate-Failure` works on the live URL.
-- The cache lives in memory. If a free-tier host sleeps, it wakes up empty: the first repeat runs live, the next one hits `LLM_CACHE`.
+- `ENABLE_FAILURE_SIMULATION=true` is set in production (`backend/fly.toml`), so `X-Simulate-Failure` works on the live URL and **Run checks** can pass all 14 rules there.
+- The cache lives in memory. Fly stops the machine when it has been idle, and it starts again on the next request with an empty cache: the first repeat runs live, the next one hits `LLM_CACHE`. History is safe, because it sits on a volume.
+- The first request after an idle period is slower, because the machine has to start.
+
+### Deployment
+
+```mermaid
+flowchart LR
+    B["Browser"] -->|"static files"| P["Cloudflare Pages<br/>pakka.madebyshaad.com"]
+    B -->|"HTTPS, CORS"| F["Fly.io app pakka-api<br/>region sin · 1 machine"]
+    F --> V[("Volume data<br/>/data/app.db")]
+    F --> G["Gemini via LiteLLM"]
+```
+
+| Part | Where | Details |
+|---|---|---|
+| Frontend | Cloudflare Pages, project `pakka` | Static Vite build. Production branch `main`. Custom domain `pakka.madebyshaad.com` (a `CNAME` to `pakka-7eh.pages.dev`). The API URL is baked in at build time through `VITE_API_BASE_URL` |
+| Backend | Fly.io app `pakka-api`, region `sin` | The `runtime` stage of `backend/Dockerfile`. One `shared-cpu-1x` machine with 512 MB. Stops when idle, starts on request. Health check on `/health` |
+| Data | Fly volume `data`, 1 GB, mounted at `/data` | Holds the SQLite file `/data/app.db`. A volume belongs to one machine, so the app must stay at **one machine** |
+| Secrets | `LLM_API_KEYS` as a Fly secret | Never in git, never in `fly.toml` |
+| Config in git | [`backend/fly.toml`](backend/fly.toml) | `DATABASE_URL`, `ALLOWED_ORIGINS` (`https://pakka.madebyshaad.com`, exact), `ENABLE_FAILURE_SIMULATION` |
+
+**CI/CD.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to `main` and every pull request. Pushing to `main` also deploys, after all checks pass.
+
+| Job | What it checks |
+|---|---|
+| Backend tests | `pytest` (37 cases) |
+| Frontend build + tests | `vite build`, the Code 128 decode test and the Playwright UI tests at 1440 and 390 px |
+| Secret scan | gitleaks over the full git history |
+| Static analysis | Semgrep (Python, JavaScript, OWASP top 10, secrets) |
+| Dependency audit | `pip-audit`, `npm audit` at high severity, and dependency review on pull requests |
+| Image build + scan | hadolint, a build of the backend `runtime` image, Trivy on the image (fixable HIGH and CRITICAL fail) and Trivy on the Dockerfiles and `fly.toml` |
+| **CI passed** | One gate over all of the above. This is the only check `main` requires |
+
+After the gate passes on `main`:
+
+1. **Deploy backend:** `flyctl deploy --remote-only` from `backend/`, then a retrying `curl` of `/health`.
+2. **Deploy frontend:** builds with `VITE_API_BASE_URL`, runs `wrangler pages deploy dist --project-name pakka --branch main`, then a `curl` of `https://pakka.madebyshaad.com/`.
+
+The frontend goes second, so a new UI never meets an old API. Deploys never cancel each other mid-run. Both deploy jobs use the GitHub environment `production`.
+
+**Branch protection on `main`:** changes go through a pull request, `CI passed` must be green and the branch up to date, history stays linear, and force pushes and deletion are blocked. Dependabot opens weekly update PRs for Actions, pip, npm and Docker. `litellm` is pinned on purpose, so review those bumps by hand.
+
+**Secrets and variables** (GitHub, repo Settings, Environments, `production`):
+
+| Name | Kind | Value |
+|---|---|---|
+| `FLY_API_TOKEN` | Secret | `fly tokens create deploy -a pakka-api` |
+| `CLOUDFLARE_API_TOKEN` | Secret | A token with only **Cloudflare Pages: Edit** |
+| `CLOUDFLARE_ACCOUNT_ID` | Secret | From the Cloudflare dashboard |
+| `API_URL` | Variable, optional | Backend URL for the build and smoke test. Defaults to `https://pakka-api.fly.dev` |
+
+<details>
+<summary><b>First-time setup</b></summary>
+
+```bash
+# Backend (log in to the Fly account that should own the app)
+fly auth login
+cd backend
+fly launch --no-deploy --copy-config --org personal   # use your org slug
+fly volumes create data --size 1 --region sin         # same region as fly.toml
+fly secrets set LLM_API_KEYS="key1,key2"
+fly deploy
+
+# Frontend
+cd ../frontend
+VITE_API_BASE_URL=https://pakka-api.fly.dev npm run build
+npx wrangler pages deploy dist --project-name pakka --branch main
+```
+
+Then in Cloudflare: Workers & Pages, `pakka`, Custom domains, add `pakka.madebyshaad.com`. If a Worker already owns that hostname, remove it from the Worker's domains first.
+
+</details>
+
+<details>
+<summary><b>Manual deploy, rollback, checks</b></summary>
+
+```bash
+# Redeploy the backend by hand
+(cd backend && fly deploy --remote-only)
+
+# Roll back the backend
+fly releases -a pakka-api                 # list versions
+fly deploy -a pakka-api --image <image from an older release>
+
+# Roll back the frontend: Cloudflare, Workers & Pages, pakka, Deployments,
+# open an older production deployment, Rollback to this deployment.
+# Or revert the commit through a pull request and let the pipeline redeploy.
+
+# Check the live stack
+curl https://pakka-api.fly.dev/health
+make verify URL=https://pakka-api.fly.dev
+```
+
+- Fly takes daily snapshots of the volume. Restore from one with `fly volumes snapshots list` and `fly volumes create --snapshot-id`.
+- Never scale past one machine: a second machine would get its own empty volume and its own cache.
+- A change to `ALLOWED_ORIGINS` or the frontend domain needs a backend deploy, or the browser will fail on CORS.
+
+</details>
 
 ---
 
@@ -104,7 +201,7 @@ cd ../frontend && npm ci && npm run dev   # http://localhost:3000
 | `DEFAULT_SYSTEM_PROMPT` | Used when a session sets no `system_prompt` |
 | `LLM_TIMEOUT_SECONDS` | How long one key gets before the next (default `15`) |
 | `LLM_MOCK_RESPONSE` | Offline test reply. Leave unset on a real deployment |
-| `VITE_API_BASE_URL` | Frontend build arg: where the browser finds the backend |
+| `VITE_API_BASE_URL` | Frontend build arg: where the browser finds the backend (default `http://localhost:8000`) |
 
 Point every key at the same model. The cache key is the model plus the messages, never the key, so an answer from `key_1` stays right for `key_2`.
 

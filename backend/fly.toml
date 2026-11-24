@@ -10,6 +10,7 @@ primary_region = 'sin'
 [env]
   ALLOWED_ORIGINS = 'https://pakka.madebyshaad.com'
   DATABASE_URL = 'sqlite:////data/app.db'
+  ENABLE_FAILURE_SIMULATION = 'true'
 
 [[mounts]]
   source = 'data'
