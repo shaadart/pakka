@@ -1,0 +1,28 @@
+services:
+  backend:
+    build: ./backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Always the named volume, whatever .env says.
+      DATABASE_URL: sqlite:////data/app.db
+    ports:
+      - "8000:8000"
+    volumes:
+      - appdata:/data
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  appdata:
