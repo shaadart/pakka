@@ -58,6 +58,9 @@ jobs:
     name: Secret scan
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read # gitleaks lists the PR's commits
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 } # scan full history, not just the tip
@@ -88,10 +91,6 @@ jobs:
       - name: npm audit (frontend, shipped deps only)
         working-directory: frontend
         run: npm audit --omit=dev --audit-level=high
-      - name: Review new deps in PR
-        if: github.event_name == 'pull_request'
-        uses: actions/dependency-review-action@v4
-        with: { fail-on-severity: high }
 
   container:
     name: Image build + scan

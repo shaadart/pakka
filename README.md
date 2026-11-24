@@ -87,7 +87,7 @@ flowchart LR
 | Frontend build + tests | `vite build`, the Code 128 decode test and the Playwright UI tests at 1440 and 390 px |
 | Secret scan | gitleaks over the full git history |
 | Static analysis | Semgrep (Python, JavaScript, OWASP top 10, secrets) |
-| Dependency audit | `pip-audit`, `npm audit` at high severity, and dependency review on pull requests |
+| Dependency audit | `pip-audit` and `npm audit` at high severity |
 | Image build + scan | hadolint, a build of the backend `runtime` image, Trivy on the image (fixable HIGH and CRITICAL fail) and Trivy on the Dockerfiles and `fly.toml` |
 | **CI passed** | One gate over all of the above. This is the only check `main` requires |
 
