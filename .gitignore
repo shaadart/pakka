@@ -14,3 +14,4 @@ dist/
 # Frontend test output
 test-results/
 playwright-report/
+frontend/1/

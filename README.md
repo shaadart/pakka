@@ -20,8 +20,8 @@
 | Any reply | Counts what that one reply used | Latency · input and output tokens |
 
 <p align="center">
-  <img src="docs/images/screens/hero.png" alt="Pakka chat. The first answer is LIVE_INFERENCE from key_1 in 1501 ms, 40 in and 25 out tokens. The same question in a new session comes back from the cache in 1 ms, 0 billed, with the same barcode and a link to the first receipt. The History panel shows the saved rows." width="100%">
-  <br><sub>A real run, nothing simulated: a live answer in 1.5 s. Asked again in a new session, the same answer came from the cache in 1 ms and billed 0 tokens. Each receipt has a <b>Copy reply</b> link.</sub>
+  <img src="docs/images/screens/hero.png" alt="Pakka chat. The first answer is LIVE_INFERENCE from key_1 in 997 ms, 38 in and 30 out tokens. The same question in a new session comes back from the cache in 1 ms, 0 billed, with the same barcode and a link to the first receipt. The History panel shows the saved rows." width="100%">
+  <br><sub>A real run, nothing simulated: a live answer in 1 s. Asked again in a new session, the same answer came from the cache in 1 ms and billed 0 tokens. Each receipt has a <b>Copy reply</b> link.</sub>
 </p>
 
 > **Grading on a clock?** Open the app, open **Test rig** and press **Run checks**, then **Start**. All 14 contract rules run live from your browser.

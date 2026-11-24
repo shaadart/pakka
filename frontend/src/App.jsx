@@ -360,6 +360,9 @@ export default function App() {
           </div>
           {newBelow && <div className="below"><button className="btn" type="button" onClick={toBottom}>New reply below</button></div>}
           <Composer onSend={send} pending={pending} />
+          <footer className="credit">
+            Made by Shaad · <a href="https://madebyshaad.com" target="_blank" rel="noopener">See more of my work</a>
+          </footer>
         </section>
 
         {ledgerOpen && <div className="scrim" onClick={() => setLedgerOpen(false)} />}
@@ -373,10 +376,6 @@ export default function App() {
           inert={inspecting}
         />
       </main>
-
-      <footer className="credit">
-        Made by Shaad · <a href="https://madebyshaad.com" target="_blank" rel="noopener">See more of my work</a>
-      </footer>
 
       {inspecting && <Inspection onClose={() => { setInspecting(false); loadLedger(sidRef.current); }} />}
     </div>

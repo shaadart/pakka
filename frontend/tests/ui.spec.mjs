@@ -294,3 +294,17 @@ test("spacing and type scale with the user's font size", async ({ page }) => {
   expect(await px()).toBeGreaterThan(before * 1.4);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize().width);
 });
+
+test("the credit link is visible, and History runs to the bottom of the screen", async ({ page }) => {
+  await open(page);
+  const link = page.getByRole("link", { name: "See more of my work" });
+  await expect(link).toBeVisible();
+  await expect(link).toHaveAttribute("href", "https://madebyshaad.com");
+  const vh = page.viewportSize().height;
+  const credit = await page.locator(".credit").boundingBox();
+  expect(credit.y + credit.height).toBeGreaterThan(vh - 1);
+  if (!isMobile(page)) {
+    const ledger = await page.locator(".ledger").boundingBox();
+    expect(ledger.y + ledger.height).toBeGreaterThan(vh - 1);
+  }
+});
