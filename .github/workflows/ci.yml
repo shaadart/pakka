@@ -1,0 +1,172 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege by default; jobs that need more ask for it.
+permissions:
+  contents: read
+
+# Newer push cancels older CI runs on the same ref. Deploys never cancel mid-flight.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+
+  frontend:
+    name: Frontend build + tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults: { run: { working-directory: frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm test
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: frontend/test-results
+          retention-days: 7
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 } # scan full history, not just the tip
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependencies:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: pip-audit (backend)
+        run: pipx run pip-audit -r backend/requirements.txt --strict
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: npm audit (frontend, shipped deps only)
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+      - name: Review new deps in PR
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@v4
+        with: { fail-on-severity: high }
+
+  container:
+    name: Image build + scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint Dockerfiles
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: backend/Dockerfile
+          failure-threshold: error
+      - run: docker build --target runtime -t pakka-backend:ci backend
+      - name: Trivy image scan (fixable HIGH/CRITICAL only)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: pakka-backend:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Trivy config scan (Dockerfiles, fly.toml)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+  # One required check for branch protection.
+  gate:
+    name: CI passed
+    if: always()
+    needs: [backend, frontend, secrets, dependencies, container]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo '${{ toJSON(needs.*.result) }}' | grep -qvE 'failure|cancelled' || exit 1
+
+  deploy-backend:
+    name: Deploy backend (Fly.io)
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production # add required reviewers in repo settings for a manual approval step
+    concurrency: { group: deploy-backend, cancel-in-progress: false }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy
+        working-directory: backend
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      - name: Smoke test
+        run: curl -fsS --retry 10 --retry-delay 6 --retry-all-errors "${API_URL}/health"
+        env:
+          API_URL: ${{ vars.API_URL || 'https://pakka-api.fly.dev' }}
+
+  deploy-frontend:
+    name: Deploy frontend (Cloudflare Pages)
+    needs: deploy-backend # backend first: the new UI may call new API behaviour
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    concurrency: { group: deploy-frontend, cancel-in-progress: false }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build
+        working-directory: frontend
+        run: npm ci && npm run build
+        env:
+          VITE_API_BASE_URL: ${{ vars.API_URL || 'https://pakka-api.fly.dev' }}
+      - name: Deploy
+        working-directory: frontend
+        run: npx --yes wrangler@4 pages deploy dist --project-name pakka --branch main
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Smoke test
+        run: curl -fsS --retry 5 --retry-delay 5 --retry-all-errors https://pakka.madebyshaad.com/ -o /dev/null
