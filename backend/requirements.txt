@@ -1,0 +1,7 @@
+# Runtime. Pinned: the LiteLLM cache and router behaviour in the README was verified on 1.110.3.
+litellm==1.110.3
+fastapi==0.165.0
+uvicorn[standard]==0.54.0
+# LiteLLM's cache-hit path imports these from its proxy package.
+orjson==3.13.0
+soundfile==0.14.0
