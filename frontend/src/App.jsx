@@ -312,7 +312,7 @@ export default function App() {
         {health.state === "closed" ? (
           <div className="sign closed" role="status" title="From GET /health">
             <span className="dot" aria-hidden="true" />
-            {sign}
+            <span>{sign}</span>
             <button className="btn" type="button" onClick={checkHealth}>Retry</button>
           </div>
         ) : (
