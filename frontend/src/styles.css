@@ -133,6 +133,12 @@ textarea { caret-color: var(--amber); }
   padding: 0.1875rem 0.75rem;
   max-width: 100%; /* wraps instead of overflowing when the user's text size is large */
 }
+button.sign { font: inherit; font-size: 0.8125rem; color: inherit; background: transparent; cursor: pointer; transition: border-color 0.12s ease, background-color 0.12s ease; }
+button.sign:hover, button.sign[aria-expanded="true"] { border-color: var(--muted); }
+button.sign:active { background: var(--rule); }
+/* Words settle in one after another. The resting state is the visible one, so no animation means no hidden text. */
+.sign .w { display: inline-block; animation: word 0.55s cubic-bezier(0.16, 1, 0.3, 1) backwards; animation-delay: calc(var(--i) * 70ms); }
+@keyframes word { from { opacity: 0; transform: translateY(0.4em); filter: blur(3px); } }
 .sign .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--amber); flex: none; }
 .sign.open .dot { background: var(--ok); }
 .sign.waking, .sign.checking { color: var(--amber); }
@@ -444,7 +450,7 @@ textarea::placeholder { color: var(--muted); }
   .composer-wrap { padding-right: var(--gutter-r); }
 }
 @media (max-width: 560px) {
-  .btn, .chip, .twin, .copy { min-height: 2.75rem; }
+  .btn, .chip, .twin, .copy, button.sign { min-height: 2.75rem; }
   .top { gap: 0.5rem 0.75rem; }
   .brand p { display: none; }
   .actions { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; width: 100%; }
@@ -452,7 +458,7 @@ textarea::placeholder { color: var(--muted); }
   .rig { max-height: 60vh; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .slip, .checks li, .flash .slip { animation: none; }
+  .slip, .checks li, .flash .slip, .sign .w { animation: none; }
   .ledger, .ledger.open, .btn, .chip, .brand svg .ticket-ghost { transition: none; }
   .btn:hover:not(:disabled), .chip:hover:not(:disabled), .btn:active:not(:disabled), .chip:active:not(:disabled),
   .brand:hover svg .ticket-ghost { transform: none; }
