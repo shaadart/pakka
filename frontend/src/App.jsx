@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getHealth, getHistory, postChat } from "./api.js";
 import { Slip, VoidSlip } from "./components/Slip.jsx";
 import Ledger from "./components/Ledger.jsx";
@@ -286,10 +286,17 @@ export default function App() {
   sendRef.current = send;
   const retry = useCallback((item) => { drop(item.id); sendRef.current(item.text); }, [drop]);
 
-  const sign =
-    health.state === "open" ? <>Online · {health.data.keys_configured} keys · cache {health.data.cache_enabled ? "on" : "off"}</>
-    : health.state === "closed" ? <>Backend not answering</>
-    : <>Waking the backend...</>;
+  const signText =
+    health.state === "open" ? `Online · ${health.data.keys_configured} keys · cache ${health.data.cache_enabled ? "on" : "off"}`
+    : health.state === "closed" ? "Backend not answering"
+    : "Waking the backend...";
+  // One span per word, keyed by the text: the stagger replays only when the words change, not on every 30 s re-check.
+  const sign = signText.split(" ").map((word, i) => (
+    <Fragment key={`${signText}:${i}`}>
+      {i > 0 && " "}
+      <span className="w" style={{ "--i": i }}>{word}</span>
+    </Fragment>
+  ));
   const locked = ledgerOpen || inspecting; // a drawer or dialog is open: the rest of the page is inert
 
   return (
@@ -302,11 +309,25 @@ export default function App() {
             <p>Every reply, accounted for</p>
           </div>
         </div>
-        <div className={`sign ${health.state}`} role="status" title="From GET /health">
-          <span className="dot" aria-hidden="true" />
-          {sign}
-          {health.state === "closed" && <button className="btn" type="button" onClick={checkHealth}>Retry</button>}
-        </div>
+        {health.state === "closed" ? (
+          <div className="sign closed" role="status" title="From GET /health">
+            <span className="dot" aria-hidden="true" />
+            <span>{sign}</span>
+            <button className="btn" type="button" onClick={checkHealth}>Retry</button>
+          </div>
+        ) : (
+          <button
+            className={`sign ${health.state}`}
+            type="button"
+            aria-expanded={rigOpen}
+            aria-controls="rig"
+            title="From GET /health. Tap to open the test rig"
+            onClick={() => setRigOpen((o) => !o)}
+          >
+            <span className="dot" aria-hidden="true" />
+            <span role="status">{sign}</span>
+          </button>
+        )}
         <div className="actions">
           <button className="btn" type="button" onClick={() => startSession()}>New session</button>
           <button ref={historyBtn} className="btn ledger-open" type="button" onClick={() => setLedgerOpen(true)}>History</button>

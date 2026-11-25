@@ -227,7 +227,7 @@ test("reading older messages is not interrupted; a pill offers the new reply", a
 test("the status sign re-checks the backend and reports when it goes down", async ({ page }) => {
   await page.clock.install();
   const api = await open(page);
-  await expect(page.getByRole("status")).toHaveClass(/open/);
+  await expect(page.locator(".sign")).toHaveClass(/open/);
   api.healthUp = false;
   await page.clock.fastForward(30_000);
   await expect(page.getByRole("status")).toContainText("Waking the backend");
@@ -239,6 +239,17 @@ test("the status sign re-checks the backend and reports when it goes down", asyn
   api.healthUp = true;
   await page.getByRole("status").getByRole("button", { name: "Retry" }).click();
   await expect(page.getByRole("status")).toContainText("Online");
+});
+
+test("tapping the status chip opens and closes the test rig", async ({ page }) => {
+  await open(page);
+  const chip = page.locator("button.sign");
+  await expect(page.locator("#rig")).toHaveCount(0);
+  await chip.click();
+  await expect(page.locator("#rig")).toBeVisible();
+  await expect(chip).toHaveAttribute("aria-expanded", "true");
+  await chip.click();
+  await expect(page.locator("#rig")).toHaveCount(0);
 });
 
 test("no sideways scroll at 320 px, and fonts come from this origin", async ({ page }) => {

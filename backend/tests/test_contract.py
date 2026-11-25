@@ -235,6 +235,25 @@ def test_multi_turn_sends_the_whole_history_to_the_model(client, monkeypatch):
     assert second[-1]["content"] == "Mera naam kya hai?"
 
 
+def test_a_provider_503_is_retried_on_the_same_key(client, monkeypatch):
+    import litellm
+
+    real, calls = litellm.acompletion, []
+
+    async def flaky(**kwargs):
+        calls.append(kwargs["model"])
+        if len(calls) == 1:  # Gemini's "model is experiencing high demand"
+            raise litellm.ServiceUnavailableError(message="high demand", llm_provider="gemini", model=kwargs["model"])
+        return await real(**kwargs)
+
+    monkeypatch.setattr(litellm, "acompletion", flaky)
+    r = chat(client, "s-503", "hello")
+    assert r.status_code == 200
+    assert r.json()["metadata"]["key_id"] == "key_1"
+    assert r.json()["metadata"]["fallback_attempts"] == 0
+    assert len(calls) == 2
+
+
 def test_history_survives_a_restart(make_client, tmp_path):
     first = make_client()
     chat(first, "s-p", "remember me")
