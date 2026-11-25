@@ -17,6 +17,7 @@ from typing import Any
 import litellm
 from litellm import Router
 from litellm.caching.caching import Cache
+from litellm.types.router import RetryPolicy
 
 from .config import Settings
 from .simulate import status_for
@@ -91,7 +92,12 @@ class Gateway:
                 {"model_name": key_id, "litellm_params": params, "model_info": {"id": key_id}}
             )
         fallbacks = [{self.key_ids[0]: self.key_ids[1:]}] if len(self.key_ids) > 1 else []
-        return Router(model_list=model_list, fallbacks=fallbacks, num_retries=0)
+        # Gemini's "high demand" 503 hits every key on the model at once, so switching keys
+        # cannot dodge it: wait and retry the same key once. Drills mock 429/500, never retried.
+        retry_policy = RetryPolicy(
+            ServiceUnavailableErrorRetries=1, RateLimitErrorRetries=0, InternalServerErrorRetries=0
+        )
+        return Router(model_list=model_list, fallbacks=fallbacks, num_retries=0, retry_policy=retry_policy)
 
     async def warm_up(self) -> None:
         """Pay LiteLLM's one-off import cost at startup, so the first real hit is fast."""
@@ -115,7 +121,9 @@ class Gateway:
         router = self.router if sim is None else self._build_router(sim)
         try:
             resp = await router.acompletion(model=self.key_ids[0], messages=messages)
-        except Exception as exc:  # every provider failed; LiteLLM re-raises the last error
+        # Every provider failed. LiteLLM re-raises the FIRST key's error, so this type can hide
+        # the real cause; the Router's own ERROR log line above it shows each provider body.
+        except Exception as exc:
             log.warning("all keys failed: %s", type(exc).__name__)
             raise AllProvidersDown from exc
 
